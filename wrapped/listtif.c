@@ -2,10 +2,10 @@
  * listtif.c -- lists a tiff file.
  */
 
-#include "xtiffio.h"
 #include <stdlib.h>
+#include <tiffio.h>
 
-void main(int argc,char *argv[])
+int main(int argc,char *argv[])
 {
 	char *fname="newtif.tif";
 	int flags;
@@ -14,19 +14,20 @@ void main(int argc,char *argv[])
 
 	if (argc>1) fname=argv[1];
 	
-	tif=XTIFFOpen(fname,"r");
+	tif=TIFFOpen(fname,"r");
 	if (!tif) goto failure;
 	
 	/* We want the double array listed */
-	flags = TIFFPRINT_MYMULTIDOUBLES;
+	//flags = TIFFPRINT_MYMULTIDOUBLES;
+	flags = 0;
 	
 	TIFFPrintDirectory(tif,stdout,flags);
-	XTIFFClose(tif);
+	TIFFClose(tif);
 	exit (0);
 	
 failure:
 	printf("failure in listtif\n");
-	if (tif) XTIFFClose(tif);
+	if (tif) TIFFClose(tif);
 	exit (-1);
 }
 

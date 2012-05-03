@@ -1,1 +1,5 @@
 listtif
+wrapped_libtiff
+wrapped_libtiff_recv.c
+wrapped_libtiff_send.c
+wrapped_listtif

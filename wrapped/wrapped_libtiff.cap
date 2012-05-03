@@ -1,0 +1,4 @@
+void WrappedTIFFOpen(const char *file, const char *mode);
+void WrappedTIFFPrintDirectory(FD out, long flags);
+void WrappedTIFFClose();
+

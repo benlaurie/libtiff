@@ -10,6 +10,7 @@
 #include <string.h>
 #include <sys/capability.h>
 #include <sys/resource.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -83,7 +84,7 @@ static int lc_limitfd(int fd, cap_rights_t rights)
 
 static int lc_parent_fd;
 
-static void lc_write_string(int fd, const char *string) {
+void lc_write_string(int fd, const char *string) {
   uint32_t size = strlen(string);
   if (write(fd, &size, sizeof size) != sizeof size)
     lc_panic("write failed");
@@ -91,13 +92,60 @@ static void lc_write_string(int fd, const char *string) {
     lc_panic("write failed");
 }
 
-static void lc_write_int(int fd, int n) {
+void lc_write_int(int fd, int n) {
+  if (write(fd, &n, sizeof n) != sizeof n)
+    lc_panic("write_int failed");
+}
+
+void lc_write_long(int fd, long n) {
   if (write(fd, &n, sizeof n) != sizeof n)
     lc_panic("write_int failed");
 }
 
 void lc_write_void(int fd) {
   lc_write_int(fd, 0xdeadbeef);
+}
+
+/* size of control buffer to send/recv one file descriptor */
+#define CONTROLLEN  CMSG_LEN(sizeof(int))
+
+static struct cmsghdr   *cmptr = NULL;  /* malloc'ed first time */
+
+/*
+ * Pass a file descriptor to another process.
+ * If fd<0, then -fd is sent back instead as the error status.
+ */
+void lc_write_file_descriptor(int fd, int fd_to_send) {
+  struct iovec    iov[1];
+  struct msghdr   msg;
+  char            buf[2]; /* send_fd()/recv_fd() 2-byte protocol */
+
+  iov[0].iov_base = buf;
+  iov[0].iov_len  = 2;
+  msg.msg_iov     = iov;
+  msg.msg_iovlen  = 1;
+  msg.msg_name    = NULL;
+  msg.msg_namelen = 0;
+  if (fd_to_send < 0) {
+    msg.msg_control    = NULL;
+    msg.msg_controllen = 0;
+    buf[1] = -fd_to_send;   /* nonzero status means error */
+    if (buf[1] == 0)
+      buf[1] = 1; /* -256, etc. would screw up protocol */
+  } else {
+    if (cmptr == NULL && (cmptr = malloc(CONTROLLEN)) == NULL)
+      lc_panic("malloc");
+    cmptr->cmsg_level  = SOL_SOCKET;
+    cmptr->cmsg_type   = SCM_RIGHTS;
+    cmptr->cmsg_len    = CONTROLLEN;
+    msg.msg_control    = cmptr;
+    msg.msg_controllen = CONTROLLEN;
+    *(int *)CMSG_DATA(cmptr) = fd_to_send;     /* the fd to pass */
+    buf[1] = 0;          /* zero status means OK */
+  }
+  buf[0] = 0;              /* null byte flag to recv_fd() */
+  if (sendmsg(fd, &msg, 0) != 2)
+    lc_panic("sendmsg");
 }
 
 static size_t lc_full_read(int fd, void *buffer, size_t count) {
@@ -137,13 +185,75 @@ int lc_read_int(int fd, int *result) {
   return 1;
 }
 
-static int lc_read_void(int fd) {
-  unsigned v;
+int lc_read_long(int fd, long *result) {
+  if (lc_full_read(fd, result, sizeof *result) != sizeof *result)
+    return 0;
+  return 1;
+}
+
+int lc_read_void(int fd) {
+  int v;
 
   if (!lc_read_int(fd, &v))
     return 0;
   assert(v == 0xdeadbeef);
   return 1;
+}
+
+/*
+ * Receive a file descriptor from a server process.  Also, any data
+ * received is passed to (*userfunc)(STDERR_FILENO, buf, nbytes).
+ * We have a 2-byte protocol for receiving the fd from send_fd().
+ */
+int lc_read_file_descriptor(int fd, int *fd_to_read) {
+  int             newfd, nr, status;
+  char            *ptr;
+  char            buf[2];
+  struct iovec    iov[1];
+  struct msghdr   msg;
+
+  status = -1;
+  iov[0].iov_base = buf;
+  iov[0].iov_len  = sizeof(buf);
+  msg.msg_iov     = iov;
+  msg.msg_iovlen  = 1;
+  msg.msg_name    = NULL;
+  msg.msg_namelen = 0;
+  if (cmptr == NULL && (cmptr = malloc(CONTROLLEN)) == NULL)
+    return(-1);
+  msg.msg_control    = cmptr;
+  msg.msg_controllen = CONTROLLEN;
+  if ((nr = recvmsg(fd, &msg, 0)) < 0) {
+    lc_panic("recvmsg error");
+  } else if (nr == 0) {
+    lc_panic("connection closed by server");
+    return(-1);
+  }
+  /*
+   * See if this is the final data with null & status.  Null
+   * is next to last byte of buffer; status byte is last byte.
+   * Zero status means there is a file descriptor to receive.
+   */
+  for (ptr = buf; ptr < &buf[nr]; ) {
+    if (*ptr++ == 0) {
+      if (ptr != &buf[nr-1])
+	lc_panic("message format error");
+      status = *ptr & 0xFF;  /* prevent sign extension */
+      if (status == 0) {
+	if (msg.msg_controllen != CONTROLLEN)
+	  lc_panic("status = 0 but no fd");
+	newfd = *(int *)CMSG_DATA(cmptr);
+      } else {
+	newfd = -status;
+      }
+      nr -= 2;
+    }
+  }
+  if (status >= 0) {    /* final data has arrived */
+    *fd_to_read = newfd;  /* descriptor, or -status */
+    return 1;
+  }
+  return 0;
 }
 
 void lc_send_to_parent(const char * const return_type,
@@ -251,3 +361,60 @@ int lc_wrap_filter(int (*func)(FILE *in, FILE *out), FILE *in, FILE *out,
   /* NOTREACHED */
   return 0;
 }
+
+int lc_fork(const char *executable) {
+  int pid;
+  int pfds[2];
+
+  if (socketpair(AF_UNIX, SOCK_STREAM, 0, pfds) < 0)
+    lc_panic("opening stream socket pair");
+
+  if ((pid = fork()) < 0)
+    lc_panic("Cannot fork");
+
+  if (pid != 0) {
+    /* Parent process */
+    close(pfds[1]);
+    return pfds[0];
+  } else { 
+    /* Child process */
+    int fds[2];
+    char *argv[3];
+    char buf[100];
+    extern char **environ;
+
+    close(pfds[0]);
+    if(// FIXME: CAP_SEEK should not be needed!
+       lc_limitfd(pfds[1], CAP_READ | CAP_WRITE | CAP_SEEK) < 0
+       || lc_limitfd(2, CAP_WRITE | CAP_SEEK)) {
+      lc_panic("Cannot limit descriptors");
+    }
+    fds[0] = 2;
+    fds[1] = pfds[1];
+    lc_closeallbut(fds, 2);
+
+    /* FIXME: The child must do this
+    if (lc_available() && cap_enter() < 0)
+      lc_panic("cap_enter() failed");
+    */
+
+    sprintf(buf, "%d", pfds[1]);
+
+    // FIXME: sigh. cast.
+    argv[0] = (char *)executable;
+    argv[1] = buf;
+    argv[2] = NULL;
+    // FIXME: what should we pass for |envp|?
+    // FIXME: it is unfortunate that the child gets child_fd
+    execve(executable, argv, environ);
+    lc_panic("execve failed");
+    /* NOTREACHED */
+  }
+  /* NOTREACHED */
+  return 0;
+}
+
+void lc_stop_child(int fd) {
+  assert(0);
+}
+

@@ -3,8 +3,9 @@
  *   the XTIFF extended tiff example tags.
  */
 
+#include <string.h>
 #include <stdlib.h>
-#include "xtiffio.h"
+#include <tiffio.h>
 
 
 void SetUpTIFFDirectory(TIFF *tif);
@@ -13,31 +14,31 @@ void WriteImage(TIFF *tif);
 #define WIDTH 20
 #define HEIGHT 20
 
-void main()
+int main()
 {
 	TIFF *tif=(TIFF*)0;  /* TIFF-level descriptor */
 	
-	tif=XTIFFOpen("newtif.tif","w");
+	tif=TIFFOpen("newtif.tif","w");
 	if (!tif) goto failure;
 	
 	SetUpTIFFDirectory(tif);
 	WriteImage(tif);
 	
-	XTIFFClose(tif);
+	TIFFClose(tif);
 	exit (0);
 	
 failure:
 	printf("failure in maketif\n");
-	if (tif) XTIFFClose(tif);
+	if (tif) TIFFClose(tif);
 	exit (-1);
 }
 
 
 void SetUpTIFFDirectory(TIFF *tif)
 {
-	double mymulti[6]={0.0,1.0,2.0,  3.1415926, 5.0,1.0};
-	uint32 mysingle=3456;
-	char *ascii="This file was produced by Steven Spielberg. NOT";
+	//double mymulti[6]={0.0,1.0,2.0,  3.1415926, 5.0,1.0};
+	//uint32 mysingle=3456;
+	//char *ascii="This file was produced by Steven Spielberg. NOT";
 
 	TIFFSetField(tif,TIFFTAG_IMAGEWIDTH,WIDTH);
 	TIFFSetField(tif,TIFFTAG_IMAGELENGTH,HEIGHT);
@@ -48,9 +49,9 @@ void SetUpTIFFDirectory(TIFF *tif)
 	TIFFSetField(tif,TIFFTAG_ROWSPERSTRIP,20);
 
 	/* Install the extended TIFF tag examples */
-	TIFFSetField(tif,TIFFTAG_EXAMPLE_MULTI,6,mymulti);
-	TIFFSetField(tif,TIFFTAG_EXAMPLE_SINGLE,mysingle);
-	TIFFSetField(tif,TIFFTAG_EXAMPLE_ASCII,ascii);
+	//TIFFSetField(tif,TIFFTAG_EXAMPLE_MULTI,6,mymulti);
+	//TIFFSetField(tif,TIFFTAG_EXAMPLE_SINGLE,mysingle);
+	//TIFFSetField(tif,TIFFTAG_EXAMPLE_ASCII,ascii);
 }
 
 
@@ -62,7 +63,7 @@ void WriteImage(TIFF *tif)
 	memset(buffer,0,sizeof(buffer));
 	for (i=0;i<HEIGHT;i++)
 		if (!TIFFWriteScanline(tif, buffer, i, 0))
-			TIFFErrorExt(tif->tif_clientdata, "WriteImage","failure in WriteScanline\n");
+			TIFFError("WriteImage","failure in WriteScanline\n");
 }
 
 

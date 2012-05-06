@@ -1,4 +1,12 @@
 void WrappedTIFFOpen(const char *file, const char *mode);
 void WrappedTIFFPrintDirectory(FD out, long flags);
 void WrappedTIFFClose();
-
+int WrappedTIFFVSetField(uint32 tag, va_list ap)
+     tag == TIFFTAG_IMAGEWIDTH    : (uint32 width)
+     tag == TIFFTAG_IMAGELENGTH   : (uint32 length)
+     tag == TIFFTAG_COMPRESSION   : (uint16 compression)
+     tag == TIFFTAG_PHOTOMETRIC   : (uint16 photometric)
+     tag == TIFFTAG_PLANARCONFIG  : (uint16 planarconfig)
+     tag == TIFFTAG_BITSPERSAMPLE : (uint16 bitspersample)
+     tag == TIFFTAG_ROWSPERSTRIP  : (uint32 rowsperstrip);
+int WrappedTIFFWriteScanline(size_t bufsize, char buf[bufsize], uint32 row, uint32 sample);

@@ -82,7 +82,50 @@ static int lc_limitfd(int fd, cap_rights_t rights)
   return 0;
 }
 
+// FIXME: Voldemort probably wrote this...
+void lc_make_ap(va_list *ap, ...) {
+  va_start(*ap, ap);
+}
+
 static int lc_parent_fd;
+
+static size_t lc_full_read(int fd, void *buffer, size_t count) {
+  size_t n;
+
+  for (n = 0; n < count; ) {
+    ssize_t r = read(fd, (char *)buffer + n, count - n);
+    if (r == 0)
+      return 0;
+    if (r < 0)
+      lc_panic("full_read");
+    n += r;
+  }
+  return n;
+}
+
+#define rw_scalar(type)                    \
+void lc_write_##type(int fd, type n) {     \
+  if (write(fd, &n, sizeof n) != sizeof n) \
+    lc_panic("lc_write_" #type " failed"); \
+  fprintf(stderr, "write " #type ": %u\n", (unsigned)n);	\
+}                                          \
+int lc_read_##type(int fd, type *result) { \
+  if (lc_full_read(fd, result, sizeof *result) != sizeof *result) \
+    return 0;                              \
+  fprintf(stderr, "read " #type ": %u\n", (unsigned)*result);	\
+  return 1;                                \
+}
+
+
+rw_scalar(int)
+rw_scalar(uint32_t)
+rw_scalar(uint16_t)
+rw_scalar(long)
+rw_scalar(size_t)
+
+void lc_write_void(int fd) {
+  lc_write_int(fd, 0xdeadbeef);
+}
 
 void lc_write_string(int fd, const char *string) {
   uint32_t size = strlen(string);
@@ -92,18 +135,10 @@ void lc_write_string(int fd, const char *string) {
     lc_panic("write failed");
 }
 
-void lc_write_int(int fd, int n) {
-  if (write(fd, &n, sizeof n) != sizeof n)
-    lc_panic("write_int failed");
-}
-
-void lc_write_long(int fd, long n) {
-  if (write(fd, &n, sizeof n) != sizeof n)
-    lc_panic("write_int failed");
-}
-
-void lc_write_void(int fd) {
-  lc_write_int(fd, 0xdeadbeef);
+void lc_write_char_array(int fd, const char *src, size_t size) {
+  lc_write_size_t(fd, size);
+  if (write(fd, src, size) != size)
+    lc_panic("write failed");
 }
 
 /* size of control buffer to send/recv one file descriptor */
@@ -148,27 +183,12 @@ void lc_write_file_descriptor(int fd, int fd_to_send) {
     lc_panic("sendmsg");
 }
 
-static size_t lc_full_read(int fd, void *buffer, size_t count) {
-  size_t n;
-
-  for (n = 0; n < count; ) {
-    ssize_t r = read(fd, (char *)buffer + n, count - n);
-    if (r == 0)
-      return 0;
-    if (r < 0)
-      lc_panic("full_read");
-    n += r;
-  }
-  return n;
-}
-
 int lc_read_string(int fd, char **result, uint32_t max) {
   uint32_t size;
 
   // FIXME: check for errors
   if (lc_full_read(fd, &size, sizeof size) != sizeof size)
     return 0;
-  fprintf(stderr, "Read string size %d\n", size);
   if (size > max)
     lc_panic("oversized string read");
   *result = malloc(size + 1);
@@ -176,18 +196,22 @@ int lc_read_string(int fd, char **result, uint32_t max) {
   if (n != size)
     lc_panic("string read failed");
   (*result)[size] = '\0';
+  fprintf(stderr, "Read string: %s\n", *result);
   return 1;
 }
 
-int lc_read_int(int fd, int *result) {
-  if (lc_full_read(fd, result, sizeof *result) != sizeof *result)
-    return 0;
-  return 1;
-}
+int lc_read_char_array(int fd, char **result, size_t expected_size) {
+  uint32_t size;
 
-int lc_read_long(int fd, long *result) {
-  if (lc_full_read(fd, result, sizeof *result) != sizeof *result)
+  // FIXME: check for errors
+  if (lc_full_read(fd, &size, sizeof size) != sizeof size)
     return 0;
+  fprintf(stderr, "Read array size %d\n", size);
+  assert(size == expected_size);
+  *result = malloc(size);
+  size_t n = lc_full_read(fd, *result, size);
+  if (n != size)
+    lc_panic("string read failed");
   return 1;
 }
 

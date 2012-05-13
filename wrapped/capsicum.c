@@ -105,14 +105,14 @@ static size_t lc_full_read(int fd, void *buffer, size_t count) {
 
 #define rw_scalar(type)                    \
 void lc_write_##type(int fd, type n) {     \
+  fprintf(stderr, "[%d] write " #type ": %u\n", getpid(), (unsigned)n);	\
   if (write(fd, &n, sizeof n) != sizeof n) \
     lc_panic("lc_write_" #type " failed"); \
-  fprintf(stderr, "write " #type ": %u\n", (unsigned)n);	\
 }                                          \
 int lc_read_##type(int fd, type *result) { \
   if (lc_full_read(fd, result, sizeof *result) != sizeof *result) \
     return 0;                              \
-  fprintf(stderr, "read " #type ": %u\n", (unsigned)*result);	\
+  fprintf(stderr, "[%d] read " #type ": %u\n", getpid(), (unsigned)*result); \
   return 1;                                \
 }
 
@@ -129,6 +129,7 @@ void lc_write_void(int fd) {
 
 void lc_write_string(int fd, const char *string) {
   uint32_t size = strlen(string);
+  fprintf(stderr, "[%d] write string: %s\n", getpid(), string);
   if (write(fd, &size, sizeof size) != sizeof size)
     lc_panic("write failed");
   if (write(fd, string, size) != size)
@@ -196,17 +197,16 @@ int lc_read_string(int fd, char **result, uint32_t max) {
   if (n != size)
     lc_panic("string read failed");
   (*result)[size] = '\0';
-  fprintf(stderr, "Read string: %s\n", *result);
+  fprintf(stderr, "[%d] Read string: %s\n", getpid(), *result);
   return 1;
 }
 
 int lc_read_char_array(int fd, char **result, size_t expected_size) {
-  uint32_t size;
+  size_t size;
 
-  // FIXME: check for errors
-  if (lc_full_read(fd, &size, sizeof size) != sizeof size)
+  if (!lc_read_size_t(fd, &size))
     return 0;
-  fprintf(stderr, "Read array size %d\n", size);
+  fprintf(stderr, "[%d] Read array size %zd\n", getpid(), size);
   assert(size == expected_size);
   *result = malloc(size);
   size_t n = lc_full_read(fd, *result, size);
@@ -439,6 +439,17 @@ int lc_fork(const char *executable) {
 }
 
 void lc_stop_child(int fd) {
-  assert(0);
+  int status;
+
+  lc_write_string(fd, "exit");
+  lc_read_void(fd);
+  wait(&status);
+  if(WIFEXITED(status)) {
+    status = WEXITSTATUS(status);
+    if (status != 0)
+      lc_panic("Unexpected child status");
+  } else {
+    lc_panic("Child exited abnormally");
+  }
 }
 

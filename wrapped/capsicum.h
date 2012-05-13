@@ -17,6 +17,7 @@ int lc_wrap_filter(int (*func)(FILE *in, FILE *out), FILE *in, FILE *out,
 		   const struct lc_capability *caps, size_t ncaps);
 int lc_fork(const char *executable);
 void lc_stop_child(int fd);
+void lc_exit_child(int fd);
 
 void lc_make_ap(va_list *ap, ...);
 

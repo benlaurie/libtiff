@@ -453,3 +453,7 @@ void lc_stop_child(int fd) {
   }
 }
 
+void lc_exit_child(int fd) {
+  lc_write_void(fd);
+  exit(0);
+}

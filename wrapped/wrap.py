@@ -308,13 +308,10 @@ void dispatch(int fd) {
     lc_read_string(fd, &cmd, 100);
 """)
 
-first = True
+f.write("    if (!strcmp(cmd, \"exit\"))\n")
+f.write("      lc_exit_child(fd);\n")
 for interface in interfaces:
-    if first:
-        f.write("    if (")
-        first = False
-    else:
-        f.write("    else if (")
+    f.write("    else if (")
     interface.test(f, "cmd")
     f.write(")\n      ")
     interface.call_unwrap(f)
